@@ -7,7 +7,7 @@ PB_URL = "https://api.amphen.net"
 ADMIN_EMAIL = os.environ["ADMIN_EMAIL"]
 ADMIN_PASSWORD = os.environ["ADMIN_PASSWORD"]
 
-HEADERS_REQ = {"User-Agent": "Amphen - Fitness App - Contact: info@amphen.net"}
+HEADERS_REQ = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
 
 def get_auth_token():
