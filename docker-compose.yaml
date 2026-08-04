@@ -1,0 +1,9 @@
+services:
+  amphen-sync:
+    build: .
+    container_name: amphen-sync
+    environment:
+      - ADMIN_EMAIL=${ADMIN_EMAIL}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+    command: sleep infinity
+    restart: unless-stopped
