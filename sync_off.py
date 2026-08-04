@@ -1,6 +1,7 @@
 import gzip
 import json
 import os
+import re
 import time
 import requests
 from requests.adapters import HTTPAdapter
@@ -15,6 +16,20 @@ session = requests.Session()
 retries = Retry(total=5, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504])
 session.mount("https://", HTTPAdapter(max_retries=retries, pool_maxsize=10))
 
+# unser Feldname -> (alter Schlüssel im "nutriments"-Objekt, neuer Schlüssel im "nutrients"-Objekt)
+NUTRIENT_MAP = {
+    "calories": ("energy-kcal", "energy-kcal"),
+    "fat": ("fat", "fat"),
+    "saturated_fat": ("saturated-fat", "saturated-fat"),
+    "carbs": ("carbohydrates", "carbohydrates"),
+    "sugar": ("sugars", "sugars"),
+    "fiber": ("fiber", "fiber"),
+    "protein": ("proteins", "proteins"),
+    "salt": ("salt", "salt"),
+    "sodium": ("sodium", "sodium"),
+    "alcohol": ("alcohol", "alcohol"),
+}
+
 
 def get_auth_token():
     r = session.post(
@@ -22,6 +37,41 @@ def get_auth_token():
         json={"identity": ADMIN_EMAIL, "password": ADMIN_PASSWORD},
     )
     return r.json()["token"]
+
+
+def extract_nutrients(product):
+    result = {k: 0 for k in NUTRIENT_MAP}
+    basis_unit = "100g"
+
+    nutriments = product.get("nutriments")
+    if nutriments:
+        for field, (old_key, _) in NUTRIENT_MAP.items():
+            result[field] = nutriments.get(f"{old_key}_100g", 0)
+        return result, basis_unit
+
+    nutrition = product.get("nutrition", {})
+    aggregated = nutrition.get("aggregated_set", {})
+    nutrients = aggregated.get("nutrients", {})
+    if nutrients:
+        basis_unit = aggregated.get("per", "100g")
+        for field, (_, new_key) in NUTRIENT_MAP.items():
+            entry = nutrients.get(new_key)
+            if entry and isinstance(entry, dict):
+                result[field] = entry.get("value", 0)
+
+    return result, basis_unit
+
+
+def extract_serving(product):
+    quantity = product.get("serving_quantity")
+    unit = product.get("serving_quantity_unit", "")
+    raw = product.get("serving_size", "")
+    if quantity:
+        return f"{quantity}{unit}"
+    match = re.search(r"[\d.]+", raw or "")
+    if match:
+        return f"{match.group()}{unit}"
+    return raw or ""
 
 
 def stream_off_products():
@@ -38,15 +88,14 @@ def stream_off_products():
                 name = product.get("product_name")
                 if not code or not name:
                     continue
-                nutriments = product.get("nutriments", {})
+                nutrients, basis_unit = extract_nutrients(product)
                 yield {
                     "code": code,
                     "name": name,
                     "brand": product.get("brands", ""),
-                    "protein": nutriments.get("proteins_100g", 0),
-                    "carbs": nutriments.get("carbohydrates_100g", 0),
-                    "fat": nutriments.get("fat_100g", 0),
-                    "calories": nutriments.get("energy-kcal_100g", 0),
+                    "serving_size": extract_serving(product),
+                    "basis_unit": basis_unit,
+                    **nutrients,
                 }
 
 
