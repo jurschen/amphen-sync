@@ -130,12 +130,15 @@ def save_product(product, headers):
                 timeout=15,
             )
             if resp.status_code == 400:
-                resp = session.patch(
+                resp2 = session.patch(
                     f"{PB_URL}/api/collections/off_products/records/{record_id}",
                     json=product,
                     headers=headers,
                     timeout=15,
                 )
+                if resp2.status_code >= 400:
+                    log(f"POST-Fehler: {resp.text[:200]} | PATCH-Fehler: {resp2.text[:200]}")
+                return resp2
             return resp
         except requests.exceptions.RequestException as e:
             log(f"Fehler bei {product.get('code')}, Versuch {attempt + 1}: {e}")
