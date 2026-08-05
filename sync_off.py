@@ -61,7 +61,7 @@ def get_auth_token():
 
 def extract_nutrients(product):
     result = {k: 0 for k in NUTRIENT_MAP}
-    basis_unit = "100g"
+    basis_unit = "g"
     nutriments = product.get("nutriments")
     if nutriments:
         for field, (old_key, _) in NUTRIENT_MAP.items():
@@ -71,7 +71,8 @@ def extract_nutrients(product):
     aggregated = nutrition.get("aggregated_set", {})
     nutrients = aggregated.get("nutrients", {})
     if nutrients:
-        basis_unit = aggregated.get("per", "100g")
+        per = aggregated.get("per", "100g")
+        basis_unit = per.replace("100", "").strip() or "g"
         for field, (_, new_key) in NUTRIENT_MAP.items():
             entry = nutrients.get(new_key)
             if entry and isinstance(entry, dict):
@@ -81,14 +82,15 @@ def extract_nutrients(product):
 
 def extract_serving(product):
     quantity = product.get("serving_quantity")
-    unit = product.get("serving_quantity_unit", "")
+    unit = product.get("serving_quantity_unit", "g")
     raw = product.get("serving_size", "")
     if quantity:
-        return f"{quantity}{unit}"
+        return quantity, unit
     match = re.search(r"[\d.]+", raw or "")
-    if match:
-        return f"{match.group()}{unit}"
-    return raw or ""
+    unit_match = re.search(r"[a-zA-Z]+", raw or "")
+    amount = float(match.group()) if match else 0
+    parsed_unit = unit_match.group() if unit_match else unit
+    return amount, parsed_unit
 
 
 def parse_products(raw_stream):
@@ -102,13 +104,16 @@ def parse_products(raw_stream):
             name = product.get("product_name")
             if not code or not name:
                 continue
-            nutrients, basis_unit = extract_nutrients(product)
+            nutrients, basis_unit_type = extract_nutrients(product)
+            serving_amount, serving_unit = extract_serving(product)
             yield {
                 "code": code,
                 "name": name,
                 "brand": product.get("brands", ""),
-                "serving_size": extract_serving(product),
-                "basis_unit": basis_unit,
+                "serving_amount": serving_amount,
+                "serving_unit": serving_unit,
+                "basis_amount": 100,
+                "basis_unit_type": basis_unit_type,
                 **nutrients,
             }
 
