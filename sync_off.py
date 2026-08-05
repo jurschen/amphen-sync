@@ -37,11 +37,17 @@ def log(msg):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{timestamp}] {msg}", flush=True)
 
+MAX_LOCK_AGE = 3 * 60 * 60  # 6 Stunden
 
 def acquire_lock():
     if os.path.exists(LOCK_FILE):
-        log("Ein anderer Sync läuft bereits (Lock-Datei vorhanden) — breche ab.")
-        sys.exit(0)
+        age = time.time() - os.path.getmtime(LOCK_FILE)
+        if age > MAX_LOCK_AGE:
+            log(f"Alte Lock-Datei gefunden (Alter: {round(age/3600, 1)}h) — wird als verwaist behandelt und entfernt.")
+            os.remove(LOCK_FILE)
+        else:
+            log("Ein anderer Sync läuft bereits (Lock-Datei vorhanden) — breche ab.")
+            sys.exit(0)
     with open(LOCK_FILE, "w") as f:
         f.write(str(os.getpid()))
 
