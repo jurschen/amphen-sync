@@ -92,7 +92,7 @@ def extract_serving(product):
     raw = product.get("serving_size", "")
     if quantity:
         return quantity, unit
-    match = re.search(r"[\d.]+", raw or "")
+    match = re.search(r"\d+(\.\d+)?", raw or "")
     unit_match = re.search(r"[a-zA-Z]+", raw or "")
     amount = float(match.group()) if match else 0
     parsed_unit = unit_match.group() if unit_match else unit
