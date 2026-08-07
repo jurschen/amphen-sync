@@ -14,6 +14,9 @@ ADMIN_EMAIL = os.environ["ADMIN_EMAIL"]
 ADMIN_PASSWORD = os.environ["ADMIN_PASSWORD"]
 HEADERS_REQ = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 LOCK_FILE = "/tmp/sync.lock"
+MAX_LOCK_AGE = 6 * 60 * 60  # 6 Stunden
+DOWNLOAD_PATH = "/tmp/off_export.jsonl.gz"
+TOKEN_REFRESH_INTERVAL = 30 * 60  # 30 Minuten
 
 session = requests.Session()
 retries = Retry(total=5, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504])
@@ -37,7 +40,6 @@ def log(msg):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{timestamp}] {msg}", flush=True)
 
-MAX_LOCK_AGE = 3 * 60 * 60  # 6 Stunden
 
 def acquire_lock():
     if os.path.exists(LOCK_FILE):
@@ -152,13 +154,34 @@ def save_product(product, headers):
     return None
 
 
-def run_sync(headers):
-    count = 0
-    errors = 0
+def download_file(path):
     url = "https://static.openfoodfacts.org/data/openfoodfacts-products.jsonl.gz"
+    log("Download gestartet")
     with session.get(url, stream=True, headers=HEADERS_REQ, timeout=60) as r:
         r.raise_for_status()
-        for product in parse_products(r.raw):
+        downloaded = 0
+        last_logged_mb = 0
+        with open(path, "wb") as f:
+            for chunk in r.iter_content(chunk_size=1024 * 1024):
+                f.write(chunk)
+                downloaded += len(chunk)
+                mb = downloaded // (1024 * 1024)
+                if mb - last_logged_mb >= 500:
+                    log(f"{mb} MB heruntergeladen")
+                    last_logged_mb = mb
+    log("Download abgeschlossen")
+
+
+def run_sync(headers, filepath):
+    count = 0
+    errors = 0
+    last_refresh = time.time()
+    with open(filepath, "rb") as raw:
+        for product in parse_products(raw):
+            if time.time() - last_refresh > TOKEN_REFRESH_INTERVAL:
+                headers["Authorization"] = get_auth_token()
+                last_refresh = time.time()
+                log("Token erneuert")
             resp = save_product(product, headers)
             if resp is None or resp.status_code >= 400:
                 errors += 1
@@ -171,21 +194,31 @@ def run_sync(headers):
 def sync():
     acquire_lock()
     try:
-        token = get_auth_token()
-        headers = {"Authorization": token}
+        headers = {"Authorization": get_auth_token()}
         log("Sync gestartet")
 
+        download_ok = False
         for download_attempt in range(3):
             try:
-                count, errors = run_sync(headers)
-                log(f"Fertig, insgesamt {count} verarbeitet, {errors} Fehler")
+                if not os.path.exists(DOWNLOAD_PATH):
+                    download_file(DOWNLOAD_PATH)
+                download_ok = True
                 break
             except (requests.exceptions.RequestException, OSError) as e:
-                log(f"Download-Verbindung abgebrochen (Versuch {download_attempt + 1}/3): {e}")
-                if download_attempt == 2:
-                    log("Alle Download-Versuche fehlgeschlagen, breche endgültig ab.")
+                log(f"Download fehlgeschlagen (Versuch {download_attempt + 1}/3): {e}")
+                if os.path.exists(DOWNLOAD_PATH):
+                    os.remove(DOWNLOAD_PATH)
                 time.sleep(10)
+
+        if not download_ok:
+            log("Alle Download-Versuche fehlgeschlagen, breche ab.")
+            return
+
+        count, errors = run_sync(headers, DOWNLOAD_PATH)
+        log(f"Fertig, insgesamt {count} verarbeitet, {errors} Fehler")
     finally:
+        if os.path.exists(DOWNLOAD_PATH):
+            os.remove(DOWNLOAD_PATH)
         release_lock()
 
 
